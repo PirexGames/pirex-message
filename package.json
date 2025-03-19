@@ -1,5 +1,5 @@
 {
-    "name": "com.pirexgames.rexpool",
+    "name": "com.pirexgames.pirexmessage",
     "displayName": "PirexMessage",
     "description": "Basic PubSub message system for Unity",
     "version": "1.0.0",
