@@ -1,21 +1,24 @@
 using System;
 
-public class Subscription<T> : IDisposable
+namespace PirexMessage
 {
-    private readonly Action<T> _callback;
-    private readonly Action<Action<T>> _unsubscribe;
-    private bool _isDisposed;
-
-    public Subscription(Action<T> callback, Action<Action<T>> unsubscribe)
+    public class Subscription<T> : IDisposable
     {
-        _callback = callback;
-        _unsubscribe = unsubscribe;
-    }
+        private readonly Action<T> _callback;
+        private readonly Action<Action<T>> _unsubscribe;
+        private bool _isDisposed;
 
-    public void Dispose()
-    {
-        if (_isDisposed) return;
-        _unsubscribe?.Invoke(_callback);
-        _isDisposed = true;
+        public Subscription(Action<T> callback, Action<Action<T>> unsubscribe)
+        {
+            _callback = callback;
+            _unsubscribe = unsubscribe;
+        }
+
+        public void Dispose()
+        {
+            if (_isDisposed) return;
+            _unsubscribe?.Invoke(_callback);
+            _isDisposed = true;
+        }
     }
 }
