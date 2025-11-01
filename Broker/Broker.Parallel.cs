@@ -19,7 +19,7 @@ namespace PirexMessage
             try
             {
                 var isHaveSubscriber = false;
-                Parallel.ForEach(_subscribers.Keys, parallelOptions, subscriber =>
+                Parallel.ForEach(_set.Keys, parallelOptions, subscriber =>
                 {
                     try
                     {
@@ -28,9 +28,8 @@ namespace PirexMessage
                     }
                     catch (Exception ex)
                     {
-                        Debug.LogError($"Error in parallel subscriber callback: {ex.Message}");
                         // Remove the problematic subscriber
-                        _subscribers.TryRemove(subscriber, out _);
+                        if (subscriber != null) _set.TryRemove(subscriber, out _);
                     }
                 });
 
