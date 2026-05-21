@@ -1,13 +1,19 @@
 using System;
 using System.Collections.Concurrent;
 using System.Threading.Tasks;
+#if PIREX_PIPE_UNITASK
 using Cysharp.Threading.Tasks;
+#endif
 
 namespace PirexMessage
 {
     public static class PirexPipe
     {
-        private static readonly ConcurrentDictionary<Type, object> BrokersGeneric = new ConcurrentDictionary<Type, object>();
+        private static readonly ConcurrentDictionary<Type, object> BrokersGeneric
+            = new ConcurrentDictionary<Type, object>();
+
+        // ── Internal accessors ───────────────────────────────────────────────────
+        // GetOrAdd lambda captures no local variables → compiler caches delegate per type.
 
         public static IPublisher<T> Publisher<T>()
         {
@@ -19,73 +25,84 @@ namespace PirexMessage
             return (ISubscriber<T>)BrokersGeneric.GetOrAdd(typeof(T), _ => new Broker<T>());
         }
 
+        // ── Publish ──────────────────────────────────────────────────────────────
+        // TryGetValue = single dictionary lookup (no TOCTOU, no extra GetOrAdd).
+
         public static bool Publish<T>(T payload)
         {
-            if (!BrokersGeneric.ContainsKey(typeof(T))) return false;
-            var publisher = Publisher<T>();
-            return publisher.Publish(payload);
+            if (!BrokersGeneric.TryGetValue(typeof(T), out var broker)) return false;
+            return ((IPublisher<T>)broker).Publish(payload);
         }
-        
+
 #if PIREX_PIPE_UNITASK
-        public static async UniTask<bool> PublishAsync<T>(T payload)
+        public static UniTask<bool> PublishAsync<T>(T payload)
         {
-            if (!BrokersGeneric.ContainsKey(typeof(T))) return false;
-            var publisher = Publisher<T>();
-            return await publisher.PublishAsync(payload);
+            if (!BrokersGeneric.TryGetValue(typeof(T), out var broker))
+                return UniTask.FromResult(false);
+            return ((IPublisher<T>)broker).PublishAsync(payload);
         }
 #endif
-        
+
         public static bool PublishParallel<T>(T payload)
         {
-            if (!BrokersGeneric.ContainsKey(typeof(T))) return false;
-            var publisher = Publisher<T>();
-            return publisher.PublishParallel(payload);
+            if (!BrokersGeneric.TryGetValue(typeof(T), out var broker)) return false;
+            return ((IPublisher<T>)broker).PublishParallel(payload);
         }
-        
+
         public static bool PublishParallel<T>(T data, ParallelOptions parallelOptions)
         {
-            if (!BrokersGeneric.ContainsKey(typeof(T))) return false;
-            var publisher = Publisher<T>();
-            return publisher.PublishParallel(data, parallelOptions);
+            if (!BrokersGeneric.TryGetValue(typeof(T), out var broker)) return false;
+            return ((IPublisher<T>)broker).PublishParallel(data, parallelOptions);
         }
 
-        public static IDisposable Subscribe<T>(Action<T> callback)
+        // ── Subscribe / Unsubscribe ───────────────────────────────────────────────
+
+        /// <param name="ordered">
+        /// false (default): dispatch order is unspecified — fastest path (swap-remove).
+        /// true:            dispatch in subscription order — use when order matters.
+        /// Note: if a broker for T already exists its ordering mode is fixed at creation.
+        /// </param>
+        public static IDisposable Subscribe<T>(Action<T> callback, bool ordered = false)
         {
-            var subscriber = Subscriber<T>();
-            return subscriber.Subscribe(callback);
+            // GetOrAdd: if broker doesn't exist, create with requested ordering.
+            // Lambda is cached per (T, ordered) — but ordered is a captured variable here.
+            // To avoid closure, we use TryGetValue + TryAdd pattern:
+            if (!BrokersGeneric.TryGetValue(typeof(T), out var existing))
+            {
+                var broker = new Broker<T>(ordered);
+                existing = BrokersGeneric.GetOrAdd(typeof(T), broker);
+            }
+            return ((ISubscriber<T>)existing).Subscribe(callback);
         }
-    
+
         public static void Unsubscribe<T>(Action<T> callback)
         {
-            if (callback == null)
-                return;
+            if (callback == null) return;
 
-            var subscriber = Subscriber<T>();
-            subscriber.Unsubscribe(callback);
+            // TryGetValue: never creates a new Broker when unsubscribing.
+            if (!BrokersGeneric.TryGetValue(typeof(T), out var broker)) return;
 
-            // Check if broker has no subscribers and remove it
-            if (subscriber is Broker<T> { SubscriberCount: 0 })
-            {
+            var b = (Broker<T>)broker;
+            b.Unsubscribe(callback);
+
+            // Auto-cleanup: remove empty broker to allow GC collection.
+            if (b.SubscriberCount == 0)
                 BrokersGeneric.TryRemove(typeof(T), out _);
-            }
         }
+
+        // ── Cleanup ──────────────────────────────────────────────────────────────
 
         public static void Cleanup<T>()
         {
-            if (BrokersGeneric.TryRemove(typeof(T), out var broker) && broker is IDisposable disposable)
-            {
-                disposable.Dispose();
-            }
+            if (BrokersGeneric.TryRemove(typeof(T), out var broker) && broker is IDisposable d)
+                d.Dispose();
         }
 
         public static void ClearAll()
         {
             foreach (var broker in BrokersGeneric.Values)
             {
-                if (broker is IDisposable disposable)
-                {
-                    disposable.Dispose();
-                }
+                if (broker is IDisposable d) d.Dispose();
             }
             BrokersGeneric.Clear();
         }

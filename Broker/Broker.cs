@@ -1,6 +1,5 @@
 using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using System.Threading;
 #if PIREX_PIPE_UNITASK
 using Cysharp.Threading.Tasks;
@@ -8,77 +7,204 @@ using Cysharp.Threading.Tasks;
 
 namespace PirexMessage
 {
-    public sealed partial class Broker<T> : IPublisher<T>, ISubscriber<T>
+    /// <summary>
+    /// Thread-safe, near-zero-alloc message broker with two dispatch modes.
+    ///
+    /// Unordered (default):
+    ///   - Subscribe:   O(n) dedup + O(1) append. Alloc only when growing capacity.
+    ///   - Unsubscribe: O(n) search + O(1) swap-remove. ZERO alloc.
+    ///   - Publish:     O(n) iterate [0.._count). ZERO alloc, ZERO lock.
+    ///
+    /// Ordered (preserves insertion order):
+    ///   - Subscribe:   O(n) dedup + O(1) append. Alloc only when growing capacity.
+    ///   - Unsubscribe: O(n) search + O(n) shift-remove. ZERO alloc.
+    ///   - Publish:     O(n) iterate [0.._count). ZERO alloc, ZERO lock.
+    ///
+    /// After warmup (capacity stabilised + Subscription pool filled), Subscribe/Unsubscribe
+    /// also produce ZERO GC.
+    /// </summary>
+    public sealed partial class Broker<T> : IPublisher<T>, ISubscriber<T>, IDisposable
     {
-        private readonly ConcurrentDictionary<Action<T>, byte> _set = new ConcurrentDictionary<Action<T>, byte>();
-        private Action<T>[] _snapshot = Array.Empty<Action<T>>();
-        private int _version;
-        private int _snapVersion;
-        private readonly object _rebuildLock = new object();
+        private const int InitialCapacity = 4;
 
+        // ── State ─────────────────────────────────────────────────────────────────
+        // volatile ref: Publish reads without lock; writers swap under SpinLock.
+        private volatile Action<T>[] _slots;
+        // volatile int: Publish reads without lock; writers update under SpinLock.
+        private volatile int _count;
+
+        private readonly bool _ordered;
+
+        // SpinLock: struct (no heap alloc), ideal for short critical sections.
+        // Must NOT be readonly: Enter mutates the struct.
+        private SpinLock _writeLock = new SpinLock(enableThreadOwnerTracking: false);
+
+        // Cached delegate: avoids one alloc per Subscribe call.
+        private readonly Action<Action<T>> _unsubscribeDelegate;
+
+        // volatile: read in Publish (no lock) must see the value written under SpinLock.
+        private volatile bool _disposed;
+
+        // ── Constructor ───────────────────────────────────────────────────────────
+        /// <param name="ordered">
+        /// false (default): subscribers are dispatched in unspecified order (swap-remove).
+        /// true:            subscribers are dispatched in subscription order (shift-remove).
+        /// </param>
+        public Broker(bool ordered = false)
+        {
+            _ordered             = ordered;
+            _slots               = Array.Empty<Action<T>>();
+            _unsubscribeDelegate = Unsubscribe;
+        }
+
+        // ── ISubscriber ───────────────────────────────────────────────────────────
         public IDisposable Subscribe(Action<T> callback)
         {
             if (callback == null) throw new ArgumentNullException(nameof(callback));
-            _set.TryAdd(callback, 0);
-            Interlocked.Increment(ref _version);
-            return new Subscription<T>(callback, Unsubscribe);
+
+            bool lockTaken = false;
+            try
+            {
+                _writeLock.Enter(ref lockTaken);
+                if (_disposed) throw new ObjectDisposedException(nameof(Broker<T>));
+
+                // Dedup: scan current live range.
+                int n = _count;
+                var arr = _slots;
+                for (int i = 0; i < n; i++)
+                    if (arr[i] == callback) return Subscription<T>.Rent(callback, _unsubscribeDelegate);
+
+                // Grow capacity if needed (amortised O(1) — happens logarithmically).
+                if (n == arr.Length)
+                {
+                    int cap = arr.Length == 0 ? InitialCapacity : arr.Length * 2;
+                    var next = new Action<T>[cap];
+                    if (n > 0) Array.Copy(arr, next, n);
+                    _slots = next;   // volatile write visible to Publish before _count update
+                    arr = next;
+                }
+
+                arr[n] = callback;
+                _count = n + 1;     // volatile write: Publish sees new element atomically
+            }
+            finally
+            {
+                if (lockTaken) _writeLock.Exit(); // release fence: ensures all writes above visible
+            }
+
+            return Subscription<T>.Rent(callback, _unsubscribeDelegate);
         }
 
         public void Unsubscribe(Action<T> callback)
         {
             if (callback == null) return;
-            _set.TryRemove(callback, out _);
-            Interlocked.Increment(ref _version);
+
+            bool lockTaken = false;
+            try
+            {
+                _writeLock.Enter(ref lockTaken);
+                if (_disposed) return;
+
+                var arr = _slots;
+                int n   = _count;
+                int idx = IndexOf(arr, callback, n);
+                if (idx < 0) return;
+
+                if (_ordered)
+                    RemoveOrdered(arr, idx, n);
+                else
+                    RemoveUnordered(arr, idx, n);
+            }
+            finally
+            {
+                if (lockTaken) _writeLock.Exit();
+            }
         }
 
+        // Swap the removed element with the last → O(1), no array copy.
+        // Changes iteration order — acceptable for unordered mode.
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void RemoveUnordered(Action<T>[] arr, int idx, int n)
+        {
+            arr[idx]     = arr[n - 1]; // move last to removed slot
+            arr[n - 1]   = null;       // clear last slot (help GC)
+            _count       = n - 1;      // volatile write: Publish won't iterate past this
+        }
+
+        // Shift elements left → O(n), preserves insertion order.
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void RemoveOrdered(Action<T>[] arr, int idx, int n)
+        {
+            // Array.Copy is optimised memmove — faster than a manual loop.
+            if (idx < n - 1) Array.Copy(arr, idx + 1, arr, idx, n - idx - 1);
+            arr[n - 1] = null;  // clear vacated last slot (help GC)
+            _count     = n - 1; // volatile write
+        }
+
+        // ── IPublisher ────────────────────────────────────────────────────────────
+        /// <summary>
+        /// Hot path: ZERO allocation, ZERO lock.
+        /// Reads a volatile snapshot of (slots, count) then iterates.
+        /// </summary>
         public bool Publish(T data)
         {
-            if (data == null) return false;
+            var arr = _slots;  // volatile read — acquire fence
+            int n   = _count;  // volatile read
 
-            var ver = Volatile.Read(ref _version);
-            if (ver != Volatile.Read(ref _snapVersion))
+            if (_disposed) throw new ObjectDisposedException(nameof(Broker<T>));
+            if (n == 0) return false;
+
+            for (int i = 0; i < n; i++)
             {
-                lock (_rebuildLock)
+                var s = arr[i];
+                if (s == null) continue; // safety: concurrent unordered write
+                try   { s(data); }
+                catch (Exception ex)
                 {
-                    ver = Volatile.Read(ref _version);
-                    if (ver != _snapVersion)
-                    {
-                        var arrSnapShot = new Action<T>[_set.Count];
-                        int i = 0;
-                        foreach (var kv in _set) arrSnapShot[i++] = kv.Key;
-                        Volatile.Write(ref _snapshot, arrSnapShot);
-                        Volatile.Write(ref _snapVersion, ver);
-                    }
+                    UnityEngine.Debug.LogException(ex);
+                    Unsubscribe(s); // rare — exception in subscriber
                 }
             }
 
-            var arr = Volatile.Read(ref _snapshot);
-            List<Action<T>> faulty = null;
-
-            for (int i = 0; i < arr.Length; i++)
-            {
-                try { arr[i]?.Invoke(data); }
-                catch { (faulty ??= new List<Action<T>>(4)).Add(arr[i]); }
-            }
-
-            if (faulty != null)
-            {
-                for (int i = 0; i < faulty.Count; i++)
-                    _set.TryRemove(faulty[i], out _);
-                Interlocked.Add(ref _version, faulty.Count);
-            }
-
-            return arr.Length > 0;
+            return true;
         }
 
 #if PIREX_PIPE_UNITASK
         public UniTask<bool> PublishAsync(T data)
         {
-            var ok = Publish(data);
-            return UniTask.FromResult(ok);
+            return UniTask.FromResult(Publish(data));
         }
 #endif
 
-        public int SubscriberCount => _set.Count;
+        // ── Misc ──────────────────────────────────────────────────────────────────
+        public int SubscriberCount => _count;
+
+        public void Dispose()
+        {
+            bool lockTaken = false;
+            try
+            {
+                _writeLock.Enter(ref lockTaken);
+                if (_disposed) return;
+                _disposed = true;
+                // Clear all slot refs so GC can collect delegate/closure objects.
+                var arr = _slots;
+                int n   = _count;
+                for (int i = 0; i < n; i++) arr[i] = null;
+                _count = 0;
+            }
+            finally
+            {
+                if (lockTaken) _writeLock.Exit();
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static int IndexOf(Action<T>[] arr, Action<T> target, int count)
+        {
+            for (int i = 0; i < count; i++)
+                if (arr[i] == target) return i;
+            return -1;
+        }
     }
 }
