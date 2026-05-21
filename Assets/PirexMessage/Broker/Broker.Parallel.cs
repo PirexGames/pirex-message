@@ -1,6 +1,4 @@
 using System;
-using System.Collections.Generic;
-using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 
@@ -8,48 +6,56 @@ namespace PirexMessage
 {
     public partial class Broker<T>
     {
+        // Static singleton: avoids `new ParallelOptions` allocation on every no-arg call.
+        private static readonly ParallelOptions DefaultParallelOptions = new ParallelOptions
+        {
+            MaxDegreeOfParallelism = Environment.ProcessorCount
+        };
+
+        /// <remarks>
+        /// WARNING: Runs callbacks on ThreadPool threads.
+        /// Do NOT invoke any Unity API (Transform, GameObject, etc.) inside subscribers
+        /// when using this overload — Unity's API is not thread-safe.
+        ///
+        /// Note: Parallel.For requires a closure that captures <paramref name="data"/> and
+        /// the snapshot; this path is inherently not zero-alloc (one closure object per call).
+        /// Use <see cref="Publish"/> on the main thread for zero-alloc dispatch.
+        /// </remarks>
         public bool PublishParallel(T data, ParallelOptions parallelOptions)
         {
-            if (data == null)
-                return false;
+            // Volatile reads — same zero-alloc snapshot used by Publish.
+            var arr = _slots;
+            int n   = _count;
+            if (n == 0) return false;
 
-            if (parallelOptions == null)
-                parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount };
+            if (parallelOptions == null) parallelOptions = DefaultParallelOptions;
 
             try
             {
-                var isHaveSubscriber = false;
-                Parallel.ForEach(_set.Keys, parallelOptions, subscriber =>
+                Parallel.For(0, n, parallelOptions, i =>
                 {
-                    try
-                    {
-                        subscriber?.Invoke(data);
-                        isHaveSubscriber = true;
-                    }
-                    catch (Exception ex)
-                    {
-                        // Remove the problematic subscriber
-                        if (subscriber != null) _set.TryRemove(subscriber, out _);
-                    }
+                    var s = arr[i];
+                    if (s == null) return; // safety: null slot possible in ordered mode
+                    try   { s.Invoke(data); }
+                    catch (Exception ex) { Debug.LogException(ex); }
                 });
-
-                return isHaveSubscriber;
             }
             catch (OperationCanceledException)
             {
-                // Handle cancellation gracefully
                 return false;
             }
             catch (Exception ex)
             {
-                Debug.LogError($"Error in parallel publishing: {ex.Message}");
+                Debug.LogException(ex);
                 return false;
             }
+
+            return true;
         }
 
         public bool PublishParallel(T data)
         {
-            return PublishParallel(data, new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount });
+            return PublishParallel(data, DefaultParallelOptions);
         }
     }
 }

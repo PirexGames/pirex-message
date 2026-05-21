@@ -1,5 +1,7 @@
 using System.Threading.Tasks;
+#if PIREX_PIPE_UNITASK
 using Cysharp.Threading.Tasks;
+#endif
 
 namespace PirexMessage
 {
