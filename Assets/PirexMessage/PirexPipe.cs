@@ -98,6 +98,14 @@ namespace PirexMessage
                 d.Dispose();
         }
 
+#if UNITY_5_3_OR_NEWER
+        [UnityEngine.RuntimeInitializeOnLoadMethod(UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void Init()
+        {
+            ClearAll();
+        }
+#endif
+
         public static void ClearAll()
         {
             foreach (var broker in BrokersGeneric.Values)
