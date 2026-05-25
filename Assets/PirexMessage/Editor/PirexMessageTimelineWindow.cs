@@ -72,12 +72,12 @@ namespace PirexMessage.Editor
             UpdateRows(events);
             
             float rowHeight = 35f;
-            float totalHeight = Mathf.Max(position.height - 20, _rowTypes.Count * rowHeight + 50f);
+            float totalHeight = Mathf.Max(position.height, _rowTypes.Count * rowHeight + 80f);
             
             float minT = events.Count > 0 ? events[0].Time : 0f;
             float maxT = events.Count > 0 ? events[events.Count - 1].Time : 10f;
             float duration = Mathf.Max(10f, maxT - minT + 2f);
-            float totalWidth = Mathf.Max(position.width * 0.7f, duration * _zoom + 100f);
+            float totalWidth = Mathf.Max(position.width * 0.7f, duration * _zoom + 250f);
             
             if (events.Count > 0 && _autoScroll && Event.current.type == EventType.Repaint)
             {
@@ -97,7 +97,8 @@ namespace PirexMessage.Editor
                     if (i % 2 == 0)
                         EditorGUI.DrawRect(rowRect, new Color(0.1f, 0.1f, 0.1f, 0.05f));
                         
-                    GUI.Label(new Rect(canvasRect.x + 5 + _scrollPos.x, rowRect.y + 8, 200, 20), _rowTypes[i].Name, EditorStyles.boldLabel);
+                    GUI.Box(new Rect(canvasRect.x + _scrollPos.x, rowRect.y, 200, rowHeight), GUIContent.none);
+                    GUI.Label(new Rect(canvasRect.x + 5 + _scrollPos.x, rowRect.y + 8, 190, 20), _rowTypes[i].Name, EditorStyles.boldLabel);
                     EditorGUI.DrawRect(new Rect(canvasRect.x, rowRect.y + rowHeight, totalWidth, 1), new Color(0.5f, 0.5f, 0.5f, 0.2f));
                 }
             }
@@ -114,7 +115,12 @@ namespace PirexMessage.Editor
                 
                 if (Event.current.type == EventType.Repaint)
                 {
-                    EditorGUI.DrawRect(dotRect, evt == _selectedEvent ? Color.yellow : new Color(0.3f, 0.8f, 1f));
+                    Color dotColor = new Color(0.3f, 0.8f, 1f);
+                    if (evt == _selectedEvent) dotColor = Color.yellow;
+                    else if (evt.ExecutionTimeMs > 2.0) dotColor = Color.red;
+                    else if (evt.ExecutionTimeMs > 0.5) dotColor = new Color(1f, 0.5f, 0f);
+                    
+                    EditorGUI.DrawRect(dotRect, dotColor);
                 }
                 else if (Event.current.type == EventType.MouseDown && dotRect.Contains(Event.current.mousePosition))
                 {
@@ -140,14 +146,36 @@ namespace PirexMessage.Editor
             }
             else
             {
+                _detailScrollPos = EditorGUILayout.BeginScrollView(_detailScrollPos);
+                
                 GUILayout.Label($"Type: {_selectedEvent.EventType.Name}", EditorStyles.boldLabel);
                 GUILayout.Label($"Time: {_selectedEvent.Time:F2}s");
                 GUILayout.Label($"Frame: {_selectedEvent.Frame}");
                 
+                GUIStyle richTextLabel = new GUIStyle(EditorStyles.label) { richText = true };
+                string color = _selectedEvent.ExecutionTimeMs > 2.0 ? "red" : (_selectedEvent.ExecutionTimeMs > 0.5 ? "orange" : "white");
+                GUILayout.Label($"<color={color}>Execution Time: {_selectedEvent.ExecutionTimeMs:F3} ms</color>", richTextLabel);
+                
+                EditorGUILayout.Space();
+                GUILayout.Label("Publisher:", EditorStyles.boldLabel);
+                EditorGUILayout.SelectableLabel(_selectedEvent.Publisher ?? "Unknown", EditorStyles.wordWrappedLabel, GUILayout.Height(35));
+                
+                GUILayout.Label("Subscribers:", EditorStyles.boldLabel);
+                if (_selectedEvent.Subscribers != null && _selectedEvent.Subscribers.Length > 0)
+                {
+                    foreach (var sub in _selectedEvent.Subscribers)
+                    {
+                        GUILayout.Label($"- {sub}");
+                    }
+                }
+                else
+                {
+                    GUILayout.Label("No subscribers.");
+                }
+                
                 EditorGUILayout.Space();
                 GUILayout.Label("Payload (JSON):", EditorStyles.boldLabel);
                 
-                _detailScrollPos = EditorGUILayout.BeginScrollView(_detailScrollPos);
                 EditorGUILayout.TextArea(_selectedEvent.PayloadJson, EditorStyles.wordWrappedLabel);
                 EditorGUILayout.EndScrollView();
             }

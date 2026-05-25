@@ -12,6 +12,9 @@ namespace PirexMessage.Editor
         public Type EventType;
         public string PayloadJson;
         public int Frame;
+        public string Publisher;
+        public string[] Subscribers;
+        public double ExecutionTimeMs;
     }
 
     public static class PirexMessageProfiler
@@ -32,7 +35,7 @@ namespace PirexMessage.Editor
             };
         }
 
-        private static void HandleMessagePublished(Type type, object payload)
+        private static void HandleMessagePublished(Type type, object payload, string publisher, string[] subscribers, double executionTimeMs)
         {
             if (!IsRecording || !Application.isPlaying) return;
             
@@ -53,7 +56,10 @@ namespace PirexMessage.Editor
                 Time = Time.time,
                 EventType = type,
                 PayloadJson = json,
-                Frame = Time.frameCount
+                Frame = Time.frameCount,
+                Publisher = publisher,
+                Subscribers = subscribers,
+                ExecutionTimeMs = executionTimeMs
             });
             
             // Limit memory
