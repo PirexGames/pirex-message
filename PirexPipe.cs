@@ -62,7 +62,7 @@ namespace PirexMessage
         /// true:            dispatch in subscription order — use when order matters.
         /// Note: if a broker for T already exists its ordering mode is fixed at creation.
         /// </param>
-        public static IDisposable Subscribe<T>(Action<T> callback, bool ordered = false)
+        public static IDisposable Subscribe<T>(Action<T> callback, Predicate<T> filter = null, bool ordered = false)
         {
             // GetOrAdd: if broker doesn't exist, create with requested ordering.
             // Lambda is cached per (T, ordered) — but ordered is a captured variable here.
@@ -72,7 +72,7 @@ namespace PirexMessage
                 var broker = new Broker<T>(ordered);
                 existing = BrokersGeneric.GetOrAdd(typeof(T), broker);
             }
-            return ((ISubscriber<T>)existing).Subscribe(callback);
+            return ((ISubscriber<T>)existing).Subscribe(callback, filter);
         }
 
         public static void Unsubscribe<T>(Action<T> callback)
