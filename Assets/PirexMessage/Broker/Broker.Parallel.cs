@@ -35,8 +35,11 @@ namespace PirexMessage
                 Parallel.For(0, n, parallelOptions, i =>
                 {
                     var s = arr[i];
-                    if (s == null) return; // safety: null slot possible in ordered mode
-                    try   { s.Invoke(data); }
+                    if (s.Callback == null) return; // safety: null slot possible in ordered mode
+                    try   
+                    { 
+                        if (s.Filter == null || s.Filter(data)) s.Callback(data); 
+                    }
                     catch (Exception ex) { Debug.LogException(ex); }
                 });
             }

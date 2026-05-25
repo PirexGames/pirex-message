@@ -121,7 +121,28 @@ public class PlayerController : MonoBehaviour
 }
 ```
 
-### 5. Managing Multiple Subscriptions
+### 5. Conditional Subscription (Filtering)
+
+You can pass a `Predicate<T>` filter to `Subscribe`. The callback will only be invoked if the published payload satisfies the condition. **This retains the zero-allocation hot path.**
+
+```csharp
+// Subscriber 1: Only triggered when PlayerId == 1
+PirexPipe.Subscribe<PlayerDiedEvent>(
+    OnPlayer1Died, 
+    filter: e => e.PlayerId == 1
+);
+
+// Subscriber 2: Triggered for all deaths
+PirexPipe.Subscribe<PlayerDiedEvent>(
+    OnAnyPlayerDied
+);
+
+// Publisher
+PirexPipe.Publish(new PlayerDiedEvent { PlayerId = 1 }); // Both receive
+PirexPipe.Publish(new PlayerDiedEvent { PlayerId = 2 }); // Only Subscriber 2 receives
+```
+
+### 6. Managing Multiple Subscriptions
 
 ```csharp
 private readonly List<IDisposable> _subscriptions = new List<IDisposable>();
@@ -139,7 +160,7 @@ private void OnDestroy()
 }
 ```
 
-### 6. Using `Broker<T>` Directly (Advanced)
+### 7. Using `Broker<T>` Directly (Advanced)
 
 ```csharp
 // Create an isolated broker without going through PirexPipe
@@ -151,7 +172,7 @@ sub.Dispose();
 broker.Dispose();
 ```
 
-### 7. PublishAsync (requires UniTask)
+### 8. PublishAsync (requires UniTask)
 
 ```csharp
 #if PIREX_PIPE_UNITASK
@@ -159,7 +180,7 @@ await PirexPipe.PublishAsync(new PlayerDiedEvent { PlayerId = 1 });
 #endif
 ```
 
-### 8. Cleanup
+### 9. Cleanup
 
 ```csharp
 // Remove the broker for a specific type
