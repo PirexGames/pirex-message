@@ -217,19 +217,26 @@ namespace PirexMessage
         }
 
 #if UNITY_EDITOR
-        public string[] GetSubscriberNames()
+        public string[] GetSubscriberNames(T payload)
         {
             var arr = _slots;
             int n = _count;
             if (n == 0) return Array.Empty<string>();
-            var res = new string[n];
+            var res = new System.Collections.Generic.List<string>(n);
             for (int i = 0; i < n; i++)
             {
-                var cb = arr[i].Callback;
-                if (cb == null) continue;
-                res[i] = $"{cb.Method.DeclaringType?.Name}.{cb.Method.Name}";
+                var s = arr[i];
+                if (s.Callback == null) continue;
+                
+                bool passed = false;
+                try { passed = s.Filter == null || s.Filter(payload); } catch {}
+                
+                if (passed)
+                {
+                    res.Add($"{s.Callback.Method.DeclaringType?.Name}.{s.Callback.Method.Name}");
+                }
             }
-            return res;
+            return res.ToArray();
         }
 #endif
     }
