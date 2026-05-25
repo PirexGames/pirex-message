@@ -215,5 +215,29 @@ namespace PirexMessage
                 if (arr[i].Callback == target) return i;
             return -1;
         }
+
+#if UNITY_EDITOR
+        public string[] GetSubscriberNames(T payload)
+        {
+            var arr = _slots;
+            int n = _count;
+            if (n == 0) return Array.Empty<string>();
+            var res = new System.Collections.Generic.List<string>(n);
+            for (int i = 0; i < n; i++)
+            {
+                var s = arr[i];
+                if (s.Callback == null) continue;
+                
+                bool passed = false;
+                try { passed = s.Filter == null || s.Filter(payload); } catch {}
+                
+                if (passed)
+                {
+                    res.Add($"{s.Callback.Method.DeclaringType?.Name}.{s.Callback.Method.Name}");
+                }
+            }
+            return res.ToArray();
+        }
+#endif
     }
 }

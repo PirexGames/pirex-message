@@ -192,6 +192,28 @@ PirexPipe.ClearAll();
 
 ---
 
+## 🛠️ Event Profiler (Timeline)
+
+PirexMessage includes a built-in visual profiler to monitor events in real-time, helping you track down performance bottlenecks and trace event flows.
+
+![Profiler](Profiler.jpeg)
+
+To open the profiler:
+1. Navigate to **Window > PirexGames > PirexMessage Timeline** in the Unity Editor.
+2. Ensure the **Record** toggle is enabled (On).
+3. Enter Play Mode.
+
+### Features
+- **Zero-Allocation Tracking:** The profiling logic is enclosed in `#if UNITY_EDITOR`. It compiles out completely in production builds, guaranteeing 0 impact on your game's performance.
+- **Execution Time Visualization:** Events are plotted on a timeline and color-coded based on their total execution time (Dispatch time to all subscribers):
+  - 🔵 **Cyan:** < 0.5 ms (Fast)
+  - 🟠 **Orange:** 0.5 ms – 2.0 ms (Warning)
+  - 🔴 **Red:** > 2.0 ms (Slow - Requires optimization)
+- **Publisher Call Stack Tracking:** Click on any event dot to see exactly which Class and Method published the event (including the line number).
+- **Active Subscriber List:** The detail panel also reveals which subscribers successfully received the event (respecting any conditional filters).
+
+---
+
 ## 📊 Performance Profile
 
 | Operation | GC Alloc | Lock | Complexity |
