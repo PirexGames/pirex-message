@@ -10,7 +10,34 @@ namespace PirexMessage
     public static class PirexPipe
     {
 #if UNITY_EDITOR
-        public static event Action<Type, object> OnEditorMessagePublished;
+        public static event Action<Type, object, string, string[], double> OnEditorMessagePublished;
+
+        private static void NotifyEditor<T>(T payload, double executionTimeMs)
+        {
+            if (OnEditorMessagePublished != null)
+            {
+                var trace = new System.Diagnostics.StackTrace(2, true);
+                string publisher = "Unknown";
+                foreach (var frame in trace.GetFrames())
+                {
+                    var method = frame.GetMethod();
+                    if (method != null && method.DeclaringType != typeof(PirexPipe) && method.DeclaringType?.Namespace != "PirexMessage")
+                    {
+                        publisher = $"{method.DeclaringType.Name}.{method.Name} (Line {frame.GetFileLineNumber()})";
+                        break;
+                    }
+                }
+                
+                string[] subs = null;
+                if (BrokersGeneric.TryGetValue(typeof(T), out var b))
+                {
+                    var brokerInst = (Broker<T>)b;
+                    subs = brokerInst.GetSubscriberNames();
+                }
+                
+                OnEditorMessagePublished.Invoke(typeof(T), payload, publisher, subs, executionTimeMs);
+            }
+        }
 #endif
 
         private static readonly ConcurrentDictionary<Type, object> BrokersGeneric
@@ -35,40 +62,99 @@ namespace PirexMessage
         public static bool Publish<T>(T payload)
         {
 #if UNITY_EDITOR
-            OnEditorMessagePublished?.Invoke(typeof(T), payload);
+            System.Diagnostics.Stopwatch sw = null;
+            if (OnEditorMessagePublished != null) sw = System.Diagnostics.Stopwatch.StartNew();
 #endif
-            if (!BrokersGeneric.TryGetValue(typeof(T), out var broker)) return false;
-            return ((IPublisher<T>)broker).Publish(payload);
+            if (!BrokersGeneric.TryGetValue(typeof(T), out var broker))
+            {
+#if UNITY_EDITOR
+                if (sw != null) NotifyEditor(payload, 0);
+#endif
+                return false;
+            }
+            bool result = ((IPublisher<T>)broker).Publish(payload);
+#if UNITY_EDITOR
+            if (sw != null)
+            {
+                sw.Stop();
+                NotifyEditor(payload, sw.Elapsed.TotalMilliseconds);
+            }
+#endif
+            return result;
         }
 
 #if PIREX_PIPE_UNITASK
         public static UniTask<bool> PublishAsync<T>(T payload)
         {
 #if UNITY_EDITOR
-            OnEditorMessagePublished?.Invoke(typeof(T), payload);
+            System.Diagnostics.Stopwatch sw = null;
+            if (OnEditorMessagePublished != null) sw = System.Diagnostics.Stopwatch.StartNew();
 #endif
             if (!BrokersGeneric.TryGetValue(typeof(T), out var broker))
+            {
+#if UNITY_EDITOR
+                if (sw != null) NotifyEditor(payload, 0);
+#endif
                 return UniTask.FromResult(false);
-            return ((IPublisher<T>)broker).PublishAsync(payload);
+            }
+            var task = ((IPublisher<T>)broker).PublishAsync(payload);
+#if UNITY_EDITOR
+            if (sw != null)
+            {
+                sw.Stop();
+                NotifyEditor(payload, sw.Elapsed.TotalMilliseconds);
+            }
+#endif
+            return task;
         }
 #endif
 
         public static bool PublishParallel<T>(T payload)
         {
 #if UNITY_EDITOR
-            OnEditorMessagePublished?.Invoke(typeof(T), payload);
+            System.Diagnostics.Stopwatch sw = null;
+            if (OnEditorMessagePublished != null) sw = System.Diagnostics.Stopwatch.StartNew();
 #endif
-            if (!BrokersGeneric.TryGetValue(typeof(T), out var broker)) return false;
-            return ((IPublisher<T>)broker).PublishParallel(payload);
+            if (!BrokersGeneric.TryGetValue(typeof(T), out var broker))
+            {
+#if UNITY_EDITOR
+                if (sw != null) NotifyEditor(payload, 0);
+#endif
+                return false;
+            }
+            bool result = ((IPublisher<T>)broker).PublishParallel(payload);
+#if UNITY_EDITOR
+            if (sw != null)
+            {
+                sw.Stop();
+                NotifyEditor(payload, sw.Elapsed.TotalMilliseconds);
+            }
+#endif
+            return result;
         }
 
         public static bool PublishParallel<T>(T data, ParallelOptions parallelOptions)
         {
 #if UNITY_EDITOR
-            OnEditorMessagePublished?.Invoke(typeof(T), data);
+            System.Diagnostics.Stopwatch sw = null;
+            if (OnEditorMessagePublished != null) sw = System.Diagnostics.Stopwatch.StartNew();
 #endif
-            if (!BrokersGeneric.TryGetValue(typeof(T), out var broker)) return false;
-            return ((IPublisher<T>)broker).PublishParallel(data, parallelOptions);
+            if (!BrokersGeneric.TryGetValue(typeof(T), out var broker))
+            {
+#if UNITY_EDITOR
+                if (sw != null) NotifyEditor(data, 0);
+#endif
+                return false;
+            }
+            bool result = ((IPublisher<T>)broker).PublishParallel(data, parallelOptions);
+#if UNITY_EDITOR
+            if (sw != null)
+            {
+                sw.Stop();
+                NotifyEditor(data, sw.Elapsed.TotalMilliseconds);
+            }
+#endif
+            return result;
         }
 
         // ── Subscribe / Unsubscribe ───────────────────────────────────────────────

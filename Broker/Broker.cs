@@ -215,5 +215,22 @@ namespace PirexMessage
                 if (arr[i].Callback == target) return i;
             return -1;
         }
+
+#if UNITY_EDITOR
+        public string[] GetSubscriberNames()
+        {
+            var arr = _slots;
+            int n = _count;
+            if (n == 0) return Array.Empty<string>();
+            var res = new string[n];
+            for (int i = 0; i < n; i++)
+            {
+                var cb = arr[i].Callback;
+                if (cb == null) continue;
+                res[i] = $"{cb.Method.DeclaringType?.Name}.{cb.Method.Name}";
+            }
+            return res;
+        }
+#endif
     }
 }
