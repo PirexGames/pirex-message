@@ -97,8 +97,6 @@ namespace PirexMessage.Editor
                     if (i % 2 == 0)
                         EditorGUI.DrawRect(rowRect, new Color(0.1f, 0.1f, 0.1f, 0.05f));
                         
-                    GUI.Box(new Rect(canvasRect.x + _scrollPos.x, rowRect.y, 200, rowHeight), GUIContent.none);
-                    GUI.Label(new Rect(canvasRect.x + 5 + _scrollPos.x, rowRect.y + 8, 190, 20), _rowTypes[i].Name, EditorStyles.boldLabel);
                     EditorGUI.DrawRect(new Rect(canvasRect.x, rowRect.y + rowHeight, totalWidth, 1), new Color(0.5f, 0.5f, 0.5f, 0.2f));
                 }
             }
@@ -128,6 +126,17 @@ namespace PirexMessage.Editor
                     _autoScroll = false;
                     Event.current.Use();
                     Repaint();
+                }
+            }
+            
+            if (Event.current.type == EventType.Repaint)
+            {
+                Color bgColor = EditorGUIUtility.isProSkin ? new Color(0.22f, 0.22f, 0.22f, 1f) : new Color(0.76f, 0.76f, 0.76f, 1f);
+                for (int i = 0; i < _rowTypes.Count; i++)
+                {
+                    Rect rowRect = new Rect(canvasRect.x, canvasRect.y + i * rowHeight + 30, totalWidth, rowHeight);
+                    EditorGUI.DrawRect(new Rect(canvasRect.x + _scrollPos.x, rowRect.y, 200, rowHeight), bgColor);
+                    GUI.Label(new Rect(canvasRect.x + 5 + _scrollPos.x, rowRect.y + 8, 190, 20), _rowTypes[i].Name, EditorStyles.boldLabel);
                 }
             }
             

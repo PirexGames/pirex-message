@@ -32,7 +32,7 @@ namespace PirexMessage
                 if (BrokersGeneric.TryGetValue(typeof(T), out var b))
                 {
                     var brokerInst = (Broker<T>)b;
-                    subs = brokerInst.GetSubscriberNames();
+                    subs = brokerInst.GetSubscriberNames(payload);
                 }
                 
                 OnEditorMessagePublished.Invoke(typeof(T), payload, publisher, subs, executionTimeMs);
