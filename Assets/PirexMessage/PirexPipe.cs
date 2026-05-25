@@ -9,6 +9,10 @@ namespace PirexMessage
 {
     public static class PirexPipe
     {
+#if UNITY_EDITOR
+        public static event Action<Type, object> OnEditorMessagePublished;
+#endif
+
         private static readonly ConcurrentDictionary<Type, object> BrokersGeneric
             = new ConcurrentDictionary<Type, object>();
 
@@ -30,6 +34,9 @@ namespace PirexMessage
 
         public static bool Publish<T>(T payload)
         {
+#if UNITY_EDITOR
+            OnEditorMessagePublished?.Invoke(typeof(T), payload);
+#endif
             if (!BrokersGeneric.TryGetValue(typeof(T), out var broker)) return false;
             return ((IPublisher<T>)broker).Publish(payload);
         }
@@ -37,6 +44,9 @@ namespace PirexMessage
 #if PIREX_PIPE_UNITASK
         public static UniTask<bool> PublishAsync<T>(T payload)
         {
+#if UNITY_EDITOR
+            OnEditorMessagePublished?.Invoke(typeof(T), payload);
+#endif
             if (!BrokersGeneric.TryGetValue(typeof(T), out var broker))
                 return UniTask.FromResult(false);
             return ((IPublisher<T>)broker).PublishAsync(payload);
@@ -45,12 +55,18 @@ namespace PirexMessage
 
         public static bool PublishParallel<T>(T payload)
         {
+#if UNITY_EDITOR
+            OnEditorMessagePublished?.Invoke(typeof(T), payload);
+#endif
             if (!BrokersGeneric.TryGetValue(typeof(T), out var broker)) return false;
             return ((IPublisher<T>)broker).PublishParallel(payload);
         }
 
         public static bool PublishParallel<T>(T data, ParallelOptions parallelOptions)
         {
+#if UNITY_EDITOR
+            OnEditorMessagePublished?.Invoke(typeof(T), data);
+#endif
             if (!BrokersGeneric.TryGetValue(typeof(T), out var broker)) return false;
             return ((IPublisher<T>)broker).PublishParallel(data, parallelOptions);
         }
